@@ -105,9 +105,14 @@
     font-size: calc(var(--seat) * .13); opacity: .7;
   }
   .seat.empty .num { opacity: .25; }
+  .seat.off {
+    background: repeating-linear-gradient(45deg, #fff 0 8px, #eee 8px 16px);
+    border-style: dashed; box-shadow: none; opacity: .4; cursor: default;
+  }
+  .seat.off:active { transform: none; box-shadow: none; }
 
-  body.shuffling .seat:not(.locked) { animation: jitter .18s infinite; }
-  body.shuffling .seat:not(.locked) .num { filter: blur(.6px); }
+  body.shuffling .seat:not(.locked):not(.off) { animation: jitter .18s infinite; }
+  body.shuffling .seat:not(.locked):not(.off) .num { filter: blur(.6px); }
   .seat.locked { animation: pop .45s cubic-bezier(.2, 1.8, .4, 1); }
   .seat.flash { animation: flash 1.2s ease 2; z-index: 2; }
 
@@ -183,6 +188,17 @@
     flex: none; font-size: 12px; font-weight: 700;
     background: var(--ink); color: #fff; padding: 4px 6px;
   }
+  .student .abs-btn {
+    flex: none; padding: 4px 8px; font-size: 12px;
+    border: 3px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); background: var(--lime);
+  }
+  .student .abs-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--ink); }
+  .student.absent { background: #eee; }
+  .student.absent .name { text-decoration: line-through; opacity: .55; }
+  .student.absent .badge { background: #ccc; }
+  .student.absent .pos { background: var(--pink); color: var(--ink); }
+  .student.absent .abs-btn { background: var(--pink); }
+  body.shuffling .abs-btn { opacity: .45; pointer-events: none; }
   .hint { font-size: 14px; margin: 0 0 12px; font-weight: 500; }
 
   /* ---------- Modal ---------- */
@@ -224,7 +240,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>ACAK TEMPAT DUDUK<small>LPK Saitama · 22 siswa</small></h1>
+    <h1>ACAK TEMPAT DUDUK<small id="subtitle">LPK Saitama · 22 siswa</small></h1>
     <div class="controls">
       <button id="btnSound" title="Suara">🔊 Suara</button>
       <button id="btnReset">↺ Urut</button>
@@ -245,7 +261,7 @@
 
   <section class="list-section">
     <h2>📋 DAFTAR SISWA</h2>
-    <p class="hint">Ketuk nomor kursi untuk melihat nama. Ketuk nama di daftar untuk menyorot kursinya. Kode kursi: <b>Baris-Kursi</b> (baris 1 = paling depan, kursi dihitung dari kiri layar).</p>
+    <p class="hint">Ketuk nomor kursi untuk melihat nama. Ketuk nama di daftar untuk menyorot kursinya. Kode kursi: <b>Baris-Kursi</b> (baris 1 = paling depan, kursi dihitung dari kiri layar). Tombol <b>Hadir/Absen</b> menandai siswa yang tidak masuk — kursi paling belakang yang dikosongkan.</p>
     <div class="list" id="list"></div>
   </section>
 
@@ -292,12 +308,16 @@
   const FLICKER_COLORS = ["--yellow", "--pink", "--cyan", "--blue", "--orange", "--lime", "--purple"];
   const SHUFFLE_MS = 10000;
   const LOCK_START_MS = 6000;
-  const STORAGE_KEY = "lpk-seat-shuffle-v1";
+  const STORAGE_KEY = "lpk-seat-shuffle-v2";
+  const LEGACY_STORAGE_KEY = "lpk-seat-shuffle-v1";
 
   const $ = (id) => document.getElementById(id);
   const rowsEl = $("rows"), listEl = $("list");
-  const seats = []; // { el, row, col }
-  let assignment = STUDENTS.map((_, i) => i); // assignment[seatIndex] = studentIndex
+  const seats = []; // { el, row, col } — urut dari depan ke belakang
+  let absent = new Set(); // studentIndex yang tidak hadir
+  // assignment[seatIndex] = studentIndex. Panjangnya = jumlah siswa hadir,
+  // jadi kursi depan selalu terisi dulu dan kursi belakang yang kosong.
+  let assignment = STUDENTS.map((_, i) => i);
   let busy = false;
   let soundOn = true;
   let audio = null;
@@ -316,7 +336,7 @@
       el.className = "seat";
       el.innerHTML = `<span class="code">${r + 1}-${c + 1}</span><span class="num"></span>`;
       const idx = seats.length;
-      el.addEventListener("click", () => { if (!busy) openModal(idx); });
+      el.addEventListener("click", () => { if (!busy && idx < assignment.length) openModal(idx); });
       wrap.appendChild(el);
       seats.push({ el, row: r, col: c });
     }
@@ -333,9 +353,23 @@
     s.el.style.setProperty("--c", `var(${colorVar || ROW_COLORS[s.row]})`);
   }
 
+  const presentStudents = () => STUDENTS.map((_, i) => i).filter((i) => !absent.has(i));
+
   function renderAll() {
-    seats.forEach((_, i) => paintSeat(i, assignment[i]));
+    seats.forEach((s, i) => {
+      const on = i < assignment.length;
+      s.el.classList.toggle("off", !on);
+      if (on) {
+        paintSeat(i, assignment[i]);
+      } else {
+        s.el.querySelector(".num").textContent = "";
+        s.el.style.removeProperty("--c");
+      }
+    });
     renderList();
+    const n = absent.size;
+    $("subtitle").textContent = `LPK Saitama · ${STUDENTS.length} siswa` + (n ? ` · ${n} absen` : "");
+    $("btnShuffle").disabled = busy || assignment.length === 0;
   }
 
   function renderList() {
@@ -343,13 +377,36 @@
     assignment.forEach((st, seat) => (seatOf[st] = seat));
     listEl.innerHTML = "";
     STUDENTS.forEach((name, i) => {
+      const isAbsent = absent.has(i);
       const item = document.createElement("div");
-      item.className = "student";
-      item.innerHTML = `<div class="badge">${i + 1}</div><div class="name"></div><div class="pos">${seatCode(seatOf[i])}</div>`;
+      item.className = "student" + (isAbsent ? " absent" : "");
+      item.innerHTML = `<div class="badge">${i + 1}</div><div class="name"></div><div class="pos">${isAbsent ? "ABSEN" : seatCode(seatOf[i])}</div><button class="abs-btn">${isAbsent ? "✕ Absen" : "✓ Hadir"}</button>`;
       item.querySelector(".name").textContent = name;
-      item.addEventListener("click", () => highlightSeat(seatOf[i]));
+      item.addEventListener("click", () => { if (!isAbsent) highlightSeat(seatOf[i]); });
+      item.querySelector(".abs-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleAbsent(i);
+      });
       listEl.appendChild(item);
     });
+  }
+
+  function toggleAbsent(st) {
+    if (busy) return;
+    if (absent.has(st)) {
+      absent.delete(st);
+      // Kursi belakang berikutnya dibuka lagi untuk siswa yang kembali hadir
+      assignment.push(st);
+    } else {
+      absent.add(st);
+      // Siswa di kursi paling belakang maju mengisi kursi yang ditinggalkan
+      const seat = assignment.indexOf(st);
+      const last = assignment.pop();
+      if (seat < assignment.length) assignment[seat] = last;
+    }
+    seats.forEach((s) => s.el.classList.remove("locked"));
+    renderAll();
+    save();
   }
 
   function highlightSeat(i) {
@@ -447,13 +504,14 @@
   }
 
   function runShuffle() {
-    if (busy) return;
+    const n = presentStudents().length;
+    if (busy || n === 0) return;
     closeModal();
     setBusy(true);
-    const final = shuffled(STUDENTS.map((_, i) => i));
-    const lockOrder = shuffled(seats.map((_, i) => i));
-    const lockAt = lockOrder.map((_, k) => LOCK_START_MS + (k + 1) * ((SHUFFLE_MS - LOCK_START_MS - 300) / seats.length));
-    const locked = new Array(seats.length).fill(false);
+    const final = shuffled(presentStudents());
+    const lockOrder = shuffled(final.map((_, i) => i));
+    const lockAt = lockOrder.map((_, k) => LOCK_START_MS + (k + 1) * ((SHUFFLE_MS - LOCK_START_MS - 300) / n));
+    const locked = new Array(n).fill(false);
     seats.forEach((s) => s.el.classList.remove("locked"));
 
     const start = performance.now();
@@ -469,8 +527,8 @@
       const interval = 55 + Math.min(1, t / SHUFFLE_MS) * 160;
       if (t - lastFlicker >= interval) {
         lastFlicker = t;
-        seats.forEach((_, i) => {
-          if (!locked[i]) paintSeat(i, randInt(STUDENTS.length), FLICKER_COLORS[randInt(FLICKER_COLORS.length)]);
+        locked.forEach((isLocked, i) => {
+          if (!isLocked) paintSeat(i, final[randInt(n)], FLICKER_COLORS[randInt(FLICKER_COLORS.length)]);
         });
         beep(300 + randInt(500), 0.03, "square", 0.03);
       }
@@ -513,7 +571,7 @@
 
   function resetOrder() {
     if (busy) return;
-    assignment = STUDENTS.map((_, i) => i);
+    assignment = presentStudents();
     seats.forEach((s) => s.el.classList.remove("locked"));
     renderAll();
     $("statusText").textContent = "SIAP!";
@@ -523,13 +581,25 @@
 
   // ---------- Storage ----------
   function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(assignment)); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ assignment, absent: [...absent] })); } catch (e) {}
   }
   function load() {
+    let data = null;
     try {
-      const a = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (Array.isArray(a) && a.length === STUDENTS.length && new Set(a).size === STUDENTS.length) assignment = a;
+      data = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!data) {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY));
+        if (Array.isArray(legacy)) data = { assignment: legacy, absent: [] };
+      }
     } catch (e) {}
+    if (!data) return;
+    if (Array.isArray(data.absent)) {
+      absent = new Set(data.absent.filter((i) => Number.isInteger(i) && i >= 0 && i < STUDENTS.length));
+    }
+    const p = presentStudents();
+    const a = data.assignment;
+    const valid = Array.isArray(a) && a.length === p.length && new Set(a).size === p.length && a.every((i) => p.includes(i));
+    assignment = valid ? a : p;
   }
 
   $("btnShuffle").addEventListener("click", runShuffle);
