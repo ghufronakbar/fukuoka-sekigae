@@ -699,6 +699,65 @@
     }
   }
 
+  // ---------- Pengaturan khusus (/fix) ----------
+  // Hanya aktif di alamat /fix dan mode Kelas. Tampilan tetap sama persis.
+  const FIX = /\/fix(\.html)?\/?$/.test(location.pathname);
+  const sid = (name) => STUDENTS.indexOf(name);
+  const R = {
+    ghita: sid("Ghita Natasya Febrianti"),
+    razak: sid("Abdul Razak"),
+    fatur: sid("Dwi Afatur Rohman"),
+    groups: [
+      ["Ghita Natasya Febrianti", "Glory Syevi Vania", "Shopy Cahaya Madina", "Muhammad Zufar Sidiq", "Agil Ilham"],
+      ["Retno Anggita Pratiwi", "Aswin Dwi Lulu'il Janah", "Fetima Ayusekti Rahmaputri", "Muhammad Fikri Kurniawan"]
+    ].map((g) => g.map(sid)),
+    front: ["Baharudin Irzha Mahendra", "Abdullah Haidar", "Bintang Swabhuwana Paksa Putri", "Akbar Bakti Rifai",
+            "Dwi Afatur Rohman", "Muh Khoironi"].map(sid)
+  };
+  // Kode kursi pakai 1-based: baris = r + 1, kolom = c + 1
+  function seatAllowed(st, s) {
+    const row = s.r + 1, col = s.c + 1;
+    if (st === R.ghita) return row === 1 || (row === 2 && col === 1);
+    if (st === R.razak) return (row === 3 || row === 4) && (col === 5 || col === 6);
+    if (R.front.includes(st)) return row <= 2 || ((row === 3 || row === 4) && (col === 2 || col === 3));
+    return true;
+  }
+  const isNear = (a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1; // termasuk diagonal
+  function pairPenalty(x, y) {
+    if ((x === R.ghita && (y === R.fatur || y === R.razak)) || (y === R.ghita && (x === R.fatur || x === R.razak))) return 1000;
+    return R.groups.some((g) => g.includes(x) && g.includes(y)) ? 10 : 0;
+  }
+  // pos[k] = posisi kursi ke-k, sts[k] = siswa di kursi itu
+  function penalty(pos, sts) {
+    let p = 0;
+    for (let a = 0; a < sts.length; a++) {
+      if (!seatAllowed(sts[a], pos[a])) p += 10;
+      for (let b = a + 1; b < sts.length; b++) if (isNear(pos[a], pos[b])) p += pairPenalty(sts[a], sts[b]);
+    }
+    return p;
+  }
+  // Cari susunan acak yang memenuhi aturan; kalau mustahil, ambil yang pelanggarannya
+  // paling sedikit (aturan jarak Ghita paling diutamakan).
+  function arrange(pos, students) {
+    let best = null, bestP = Infinity;
+    const deadline = performance.now() + 300;
+    while (performance.now() < deadline) {
+      const sts = shuffled(students);
+      let p = penalty(pos, sts);
+      for (let it = 0; it < 4000 && p > 0; it++) {
+        const a = randInt(sts.length), b = randInt(sts.length);
+        if (a === b) continue;
+        [sts[a], sts[b]] = [sts[b], sts[a]];
+        const q = penalty(pos, sts);
+        if (q <= p) p = q;
+        else [sts[a], sts[b]] = [sts[b], sts[a]];
+      }
+      if (p < bestP) { best = sts; bestP = p; }
+      if (p === 0) break;
+    }
+    return best;
+  }
+
   // ---------- Shuffle ----------
   // Kursi yang dipakai saat acak/urut ulang: kursi yang sedang terisi, supaya
   // kursi kosong pilihan guru (hasil Atur Kursi) tetap kosong. Kalau jumlahnya
@@ -715,13 +774,14 @@
   }
 
   function runShuffle() {
-    const final = shuffled(presentStudents());
+    let final = shuffled(presentStudents());
     const n = final.length;
     if (busy || n === 0) return;
     closeModal();
     setBusy(true);
     const L = cur();
     const targets = activeSeats(L, n); // kursi yang sedang terisi (hasil atur manual tetap dipakai)
+    if (FIX && mode === "kelas") final = arrange(targets.map((i) => L[i]), final);
     L.forEach((s, i) => {
       if (!targets.includes(i)) { s.st = null; paintSeat(i, null); }
     });
