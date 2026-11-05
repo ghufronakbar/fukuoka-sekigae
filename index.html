@@ -300,7 +300,7 @@
 
   <section class="list-section">
     <h2>📋 DAFTAR SISWA</h2>
-    <p class="hint">Ketuk nomor kursi untuk melihat nama. Ketuk nama di daftar untuk menyorot kursinya. Kode kursi: <b>Baris-Kolom</b> (baris 1 = paling depan, kolom dihitung dari kiri layar). Tombol <b>Hadir/Absen</b> menandai siswa yang tidak masuk — kursi paling belakang yang dikosongkan. Tekan <b>Atur Kursi</b> untuk menyeret kursi.</p>
+    <p class="hint">Ketuk nomor kursi untuk melihat nama. Ketuk nama di daftar untuk menyorot kursinya. Kode kursi: <b>Baris-Kolom</b> (baris 1 = paling depan, kolom dihitung dari kiri layar). Tombol <b>Hadir/Absen</b> menandai siswa yang tidak masuk — kursi paling belakang yang dikosongkan (bisa dipindah lewat <b>Atur Kursi</b>, dan posisi kosong itu tetap dipakai saat diacak). Tekan <b>Atur Kursi</b> untuk menyeret kursi.</p>
     <div class="list" id="list"></div>
   </section>
 
@@ -700,6 +700,14 @@
   }
 
   // ---------- Shuffle ----------
+  // Kursi yang dipakai saat acak/urut ulang: kursi yang sedang terisi, supaya
+  // kursi kosong pilihan guru (hasil Atur Kursi) tetap kosong. Kalau jumlahnya
+  // tidak cocok, kembali ke kursi terdepan.
+  function activeSeats(L, n) {
+    const occupied = seatOrder(L).filter((i) => L[i].st != null);
+    return occupied.length === n ? occupied : seatOrder(L).slice(0, n);
+  }
+
   function setBusy(v) {
     busy = v;
     document.body.classList.toggle("shuffling", v);
@@ -713,7 +721,7 @@
     closeModal();
     setBusy(true);
     const L = cur();
-    const targets = seatOrder(L).slice(0, n); // kursi terdepan yang dipakai
+    const targets = activeSeats(L, n); // kursi yang sedang terisi (hasil atur manual tetap dipakai)
     L.forEach((s, i) => {
       if (!targets.includes(i)) { s.st = null; paintSeat(i, null); }
     });
@@ -778,7 +786,7 @@
 
   function resetOrder() {
     if (busy) return;
-    const L = cur(), order = seatOrder(L);
+    const L = cur(), order = activeSeats(L, presentStudents().length);
     L.forEach((s) => (s.st = null));
     presentStudents().forEach((st, k) => (L[order[k]].st = st));
     renderAll();
