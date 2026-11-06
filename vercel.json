@@ -12,8 +12,5 @@
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
       ]
     }
-  ],
-  "rewrites": [
-    { "source": "/fix", "destination": "/index.html" }
   ]
 }
